@@ -1,5 +1,5 @@
 // Importing the required modules
-const PORT =  process.env.PORT || 8080;
+const PORT =  443 || 8080;
 const WebSocketServer = require('ws');
 const fetch = require('node-fetch');
 const authKey = 'e5g7E7Y8w5'

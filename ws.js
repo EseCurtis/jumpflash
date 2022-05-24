@@ -1,65 +1,93 @@
 // Importing the required modules
 const PORT =  process.env.PORT || 8080;
-const WebSocketServer = require('ws');
+const express = require('express');
+const app = express();
+const http = require('http');
+const server = http.createServer(app);
+const io = require("socket.io")(server, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"],
+      credentials: true
+    }
+});
+
 const fetch = require('node-fetch');
+const axios = require('axios').default;
 const authKey = 'e5g7E7Y8w5'
- 
-// Creating a new websocket server
-const wss = new WebSocketServer.Server({ port: PORT })
- 
-// Creating connection using websocket
-wss.on("connection", ws => {
+
+app.get('/', (req, res) => {
+    res.send('Hello wrld');
+});
+  
+io.on("connection", ws => {
     console.log("the client has connected");
     let current_session_token = null;
-    // sending message
-    ws.on("message", async (session_token) => {
-        session_token = session_token.toString('utf-8')
-        current_session_token = session_token;
 
-        const channel_data = await get_channel_data(session_token)
-        if(channel_data.message){
-            
-            const channel_path = channel_data.message[0]
-            console.log(channel_path)
-            let data_fetched = ''
-            let sent_error = false
-    
-            let updateCheck = setInterval(async () => {
-                if(isValidURL(channel_path)){
-                    let temp_fetch_process = await fetch(channel_path)
-                    let temp_data_fetched = await temp_fetch_process.text()
-        
-                    if(temp_data_fetched != data_fetched) {
-                        data_fetched = temp_data_fetched
-                        ws.send(data_fetched)
-                    }
-                } else {
-                    if(!sent_error){
-                        ws.send(`${channel_path} is not a valid URL`)
-                        sent_error = true
-                        delete_session(current_session_token)
-                        clearInterval(updateCheck)
-                    }
-                }
-                
-            }, 1)
+    ws.on('create_session', async (channel_key) => {
+        let session_token = await create_session(channel_key)
+
+        if(session_token.message[0] == false){
+            ws.emit('error', 'Channel with this key does not exist')
+            ws.disconnect()
         } else {
-            ws.send(JSON.stringify(channel_data))
+            ws.emit('session_created', session_token.message[0])
+        }
+    })
+
+    
+    ws.on("wire", async (session_token) => {
+        current_session_token = session_token
+        let checkForUpdateInterval = 100
+        let channel_data = await get_channel_data(session_token);
+        let channel_path = channel_data.message[0];
+
+        if(channel_path !== false && isValidURL(channel_path)) {
+            let channel_path_fetch = await axios.get(channel_path)
+            let channel_path_data = channel_path_fetch.data
+            let temp_channel_path_data = ''
+
+            ws.emit('channel_data', channel_path_data)
+            
+            let checkForUpdate = setInterval(async () => {
+                let is_emitted = false
+                let temp_channel_path_fetch = await axios.get(channel_path)
+                temp_channel_path_data = temp_channel_path_fetch.data
+                
+                if(temp_channel_path_data !== channel_path_data && !is_emitted){
+                    channel_path_data = temp_channel_path_data
+                    ws.emit('channel_data', channel_path_data)
+                    is_emitted = true
+                    console.log('sent_update')
+                }
+
+            }, checkForUpdateInterval)
+
+        } else {
+            delete_session(session_token)
+            ws.emit('error', 'Channel not found')
+            ws.disconnect()
         }
         
     });
 
     // handling what to do when clients disconnects from server
-    ws.on("close", () => {
+    ws.on("disconnect", () => {
         console.log("the client has disconnected");
         delete_session(current_session_token)
     });
 
-    // handling client connection error
-    ws.onerror = function () {
-        console.log("Some Error occurred")
-    }
+    // handling what to do when clients disconnects from server
+    ws.on("error", () => {
+        console.log("error detected")
+        delete_session(current_session_token)
+    });
 });
+  
+server.listen(PORT, () => {
+    console.log('listening on ', PORT);
+});
+
 
 
 const api_endpoint = (data, api_key) => {
@@ -89,7 +117,20 @@ const get_channel_data = async (session_token) => {
     return data;
 }
 
-const delete_session= async (session_token) => {
+const create_session = async (channel_key) => {
+    const url = api_endpoint({"ch_key": channel_key}, 'session/create.php')
+    
+    const response = await fetch(url, {
+        headers: {
+            'authKey': authKey
+        }
+    });
+
+    const data = await response.json();
+    return data;
+}
+
+const delete_session = async (session_token) => {
     const url = api_endpoint({"session_token": session_token}, 'session/delete.php')
     
     const response = await fetch(url, {

@@ -9,6 +9,7 @@ const wss = new WebSocketServer.Server({ port: PORT })
  
 // Creating connection using websocket
 wss.on("connection", ws => {
+    console.log("the client has connected");
     let current_session_token = null;
     // sending message
     ws.on("message", async (session_token) => {

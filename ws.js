@@ -16,7 +16,7 @@ const fetch = require('node-fetch');
 const axios = require('axios').default;
 const authKey = 'e5g7E7Y8w5'
 
-const amvc_api = `http://localhost/zapwire/src/amvc.api`
+const amvc_api = `https://zapwire.esecurtis.com/src/amvc.api`
 
 app.get('/', (req, res) => {
     res.send('Hello wrld');

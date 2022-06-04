@@ -16,7 +16,7 @@ const fetch = require('node-fetch');
 const axios = require('axios').default;
 const authKey = 'e5g7E7Y8w5'
 
-const amvc_api = `https://zapwire.esecurtis.com/src/amvc.api`
+const amvc_api = `http://localhost/zapwire/src/amvc.api`
 
 app.get('/', (req, res) => {
     res.send('Hello wrld');
@@ -51,10 +51,39 @@ io.on("connection", ws => {
         current_session_token = session_token
         let checkForUpdateInterval = zapwire_config.refreshRate
         let channel_data = await get_channel_data(session_token);
-        let channel_path = channel_data.message[0]
+        let channel_headers = convertToObject(channel_data.message[0].headers)
+
+        send_log(channel_data.message[0].id, ws.handshake.headers.host, channel_data.message[0].ref_id)
+
+        let accepted_hostnames = convertToArray(channel_data.message[0].authorized_hostnames)
+        let all_hosts_allowed = false
+        if(channel_data.message[0].authorized_hostnames == '*'){
+            all_hosts_allowed = true
+        }
+        let axios_config = {
+            headers : channel_headers
+        }
+        let channel_path = channel_data.message[0].path
+        
+        if(accepted_hostnames.includes(ws.handshake.headers.host) !== true && all_hosts_allowed === false) {
+            ws.emit('error', 'Not authorized')
+            console.log(ws.handshake.headers.host, '- Was Not authorized', accepted_hostnames)
+            ws.disconnect()
+            delete_session(session_token)
+            return 0
+        }
 
         if(channel_path !== false && isValidURL(channel_path)) {
-            let channel_path_fetch = await axios.get(channel_path)
+            let channel_path_fetch;
+
+            try {
+                channel_path_fetch = await axios.get(channel_path, axios_config)
+                
+            } catch (err) {
+                // Handle error
+                console.log(err)
+            }
+
             let channel_path_data = channel_path_fetch.data
             let temp_channel_path_data = ''
 
@@ -62,7 +91,14 @@ io.on("connection", ws => {
             
             let checkForUpdate = setInterval(async () => {
                 let is_emitted = false
-                let temp_channel_path_fetch = await axios.get(channel_path)
+                let temp_channel_path_fetch;
+                try {
+                    temp_channel_path_fetch = await axios.get(channel_path, axios_config)
+                } catch (err) {
+                    // Handle error
+                    console.log(err)
+                    clearInterval(checkForUpdate)
+                }
                 temp_channel_path_data = temp_channel_path_fetch.data
                 
                 if(temp_channel_path_data !== channel_path_data && !is_emitted){
@@ -117,43 +153,77 @@ const api_endpoint = (data, api_key) => {
 const get_channel_data = async (session_token) => {
     const url = api_endpoint({"session_token": session_token}, 'session/get.php')
     
-    const response = await fetch(url, {
-        headers: {
-            'authKey': authKey
-        }
-    });
-    const data = await response.json();
+    const data = await jsonCheckFetch(url)
+    //const data = await response.json();
     return data;
 }
 
 const create_session = async (channel_key) => {
     const url = api_endpoint({"ch_key": channel_key}, 'session/create.php')
     
-    const response = await fetch(url, {
-        headers: {
-            'authKey': authKey
-        }
-    });
-
-    const data = await response.json();
+    const data = await jsonCheckFetch(url)
+    //const data = await response.json();
     return data;
 }
 
 const delete_session = async (session_token) => {
     const url = api_endpoint({"session_token": session_token}, 'session/delete.php')
     
-    const response = await fetch(url, {
-        headers: {
-            'authKey': authKey
-        }
-    });
-    const data = await response.json();
+    const data = await jsonCheckFetch(url)
+    //const data = await response.json()
+    return data;
+}
+
+const send_log = async (channel_id, host, user_id, status = 1) => {
+    const url = api_endpoint({"ch_id": channel_id, "req_from": host, "user_id": user_id, "status": status}, 'log/create.php')
+    
+    const data = await jsonCheckFetch(url)
+    //const data = await response.json()
+
+    console.log(data)
     return data;
 }
 
 const isValidURL = (string) => {
-    var res = string.match(/(http(s)?:\/\/.)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}([-a-zA-Z0-9@:%_\+.~#?&//=]*)/g);
+    var res = string?.match(/(http(s)?:\/\/.)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}([-a-zA-Z0-9@:%_\+.~#?&//=]*)/g);
     return (res !== null)
 }
 
+const convertToObject = (string) => {
+    let obj = {}
+    let arr = string.split(',')
+    arr.forEach(item => {
+        let temp = item.split('=')
+        if(temp[0] && temp[1] && temp[0] !== '' && temp[1] !== ''){
+            obj[(temp[0].trim())] = (temp[1].trim())
+        }
+    })
+    return obj
+}
+
+const convertToArray = (string) => {
+    let arr = string.split(',')
+    return arr
+}
+
+function arrayContains(needle, arrhaystack)
+{
+    return (arrhaystack.indexOf(needle) > -1);
+}
+
+const jsonCheckFetch = async (url) => {
+    try {  
+        const response = await fetch(url, {
+            headers: {
+                'authKey': authKey
+            }
+        });  
+        const text = await response.text();  
+        const data = JSON.parse(text);  
+
+        return data
+    } catch (err) {  
+        console.log(err)  
+    } 
+}
 console.log('Server started on port ' + PORT);
